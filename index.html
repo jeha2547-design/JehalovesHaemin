@@ -239,6 +239,15 @@
 (function() {
   const AppStorage = (function() {
     let backend = 'local';
+    const DEFAULT_FIREBASE_CONFIG = {
+      apiKey: "AIzaSyBWEokexBP8UGef_BnvpqcammcIru9VNrQ",
+      authDomain: "jehahaemin-map.firebaseapp.com",
+      projectId: "jehahaemin-map",
+      storageBucket: "jehahaemin-map.firebasestorage.app",
+      messagingSenderId: "359584553180",
+      appId: "1:359584553180:web:e3cf9d8d4b4e7ccc39bc19"
+    };
+    const DISABLED_KEY = 'km-firebase-disabled';
     let db = null;
     let unsubscribe = null;
     let remoteCb = null;
@@ -313,6 +322,7 @@
           db = firebase.firestore();
           backend = 'firestore';
           localStorage.setItem(CFG_KEY, JSON.stringify(cfg));
+          localStorage.removeItem(DISABLED_KEY);
           if (unsubscribe) { unsubscribe(); unsubscribe = null; }
           unsubscribe = db.collection('kmStorage').onSnapshot((snap) => {
             snap.docChanges().forEach((change) => {
@@ -333,12 +343,15 @@
         backend = 'local';
         db = null;
         localStorage.removeItem(CFG_KEY);
+        localStorage.setItem(DISABLED_KEY, '1');
         if (unsubscribe) { unsubscribe(); unsubscribe = null; }
       },
       tryAutoConnect() {
         try {
+          if (localStorage.getItem(DISABLED_KEY) === '1') return false;
           const raw = localStorage.getItem(CFG_KEY);
-          if (raw) return this.connect(JSON.parse(raw));
+          const cfg = raw ? JSON.parse(raw) : DEFAULT_FIREBASE_CONFIG;
+          return this.connect(cfg);
         } catch (e) {}
         return false;
       },
@@ -438,14 +451,23 @@
   }
   function hideTip() { tooltip.style.opacity = '0'; }
 
-  function onRegionClick(id) {
+  async function mergeLatestVisited() {
+    try {
+      const res = await AppStorage.get(STORAGE_KEY);
+      if (res && res.value) visited = JSON.parse(res.value);
+    } catch (e) { /* nothing saved remotely yet, keep local */ }
+  }
+
+  async function onRegionClick(id) {
+    await mergeLatestVisited();
     if (visited[id] === activeYear) delete visited[id];
     else visited[id] = activeYear;
     render();
     save();
   }
 
-  function removeRegion(id) {
+  async function removeRegion(id) {
+    await mergeLatestVisited();
     delete visited[id];
     render();
     save();
@@ -572,7 +594,11 @@
 
   // ---------- Actions ----------
   root.querySelector('#km-reset').addEventListener('click', () => {
-    if (!confirm('색칠한 모든 지역을 초기화할까요? (사진은 유지됩니다)')) return;
+    const cloudNote = AppStorage.isFirestore()
+      ? '\n\n⚠️ 실시간 공유가 켜져 있어서, 초기화하면 상대방 화면의 기록도 함께 지워져요.'
+      : '';
+    if (!confirm('색칠한 모든 지역을 초기화할까요? (사진은 유지됩니다)' + cloudNote)) return;
+    if (AppStorage.isFirestore() && !confirm('정말로 진행할까요? 되돌릴 수 없어요.')) return;
     visited = {};
     render();
     save();
