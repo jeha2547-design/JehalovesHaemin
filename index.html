@@ -50,14 +50,32 @@
     margin: 0;
   }
   .km-title .heart { color: var(--heart); }
-  .km-sub {
-    font-size: 12.5px;
-    color: var(--muted);
-    margin: 5px 0 0;
-    font-family: 'Noto Serif KR', serif;
-    font-style: italic;
+  .km-sub-row { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top: 5px; }
+  .km-sub { font-size: 12.5px; color: var(--muted); margin: 0; font-family: 'Noto Serif KR', serif; font-style: italic; }
+  .km-dday { font-size: 11px; color: var(--heart); font-weight: 700; background: #fff; border: 1px solid var(--heart); border-radius: 999px; padding: 2px 9px; }
+  .km-sido-progress { font-size: 11px; color: var(--muted); }
+  .km-roulette-btn {
+    display:flex; align-items:center; gap:6px;
+    border: 1px solid var(--ink); background: #fff; color: var(--ink);
+    font-size: 12.5px; padding: 8px 14px; border-radius: 999px; cursor: pointer;
+    font-weight: 600;
   }
-  .km-header-right { display:flex; align-items:center; gap:10px; }
+  .km-roulette-btn:hover { background: var(--ink); color: #fff; }
+  .km-stat-bars { display:flex; flex-direction:column; gap:6px; }
+  .km-stat-row { display:flex; align-items:center; gap:8px; font-size: 11.5px; }
+  .km-stat-label { width: 42px; color: var(--muted); flex-shrink:0; }
+  .km-stat-track { flex:1; background:#EDE6D4; border-radius: 5px; height: 10px; overflow:hidden; }
+  .km-stat-fill { height:100%; border-radius: 5px; }
+  .km-stat-count { width: 20px; text-align:right; color: var(--muted); flex-shrink:0; }
+  .km-roulette-display {
+    background: #fff; border: 2px dashed var(--line); border-radius: 12px;
+    padding: 28px 16px; text-align: center; margin: 14px 0;
+    font-family: 'Noto Serif KR', serif; font-size: 22px; font-weight: 700;
+    min-height: 32px; color: var(--ink);
+  }
+  .km-roulette-display.spinning { color: var(--muted); font-weight: 400; }
+  .km-roulette-actions { display:flex; gap:8px; }
+  .km-header-right { display:flex; align-items:center; gap:10px; flex-wrap: wrap; justify-content: flex-end; }
   .km-stats { text-align: right; font-family: 'Noto Serif KR', serif; }
   .km-count { font-size: 26px; font-weight: 700; color: var(--heart); line-height: 1; }
   .km-count small { font-size: 12.5px; color: var(--muted); font-weight: 400; font-family: 'Noto Sans KR', sans-serif; }
@@ -186,10 +204,15 @@
   <div class="km-title-row">
     <div>
       <p class="km-title">제하<span class="heart">♥</span>해민 데이트 지도</p>
-      <p class="km-sub">2025년부터, 함께 다녀온 곳들</p>
+      <div class="km-sub-row">
+        <p class="km-sub">2025년부터, 함께 다녀온 곳들</p>
+        <span class="km-dday" id="km-dday"></span>
+        <span class="km-sido-progress" id="km-sido-progress"></span>
+      </div>
     </div>
   </div>
   <div class="km-header-right">
+    <button class="km-roulette-btn" id="km-roulette-btn">🎲 다음 여행지 뽑기</button>
     <div class="km-stats">
       <div class="km-count" id="km-count">0<small> / 229</small></div>
       <div style="font-size:11px; color:var(--muted);" id="km-pct">0% 방문</div>
@@ -219,6 +242,10 @@
       <h3>지역 검색</h3>
       <input class="km-search" id="km-search" placeholder="예: 강남구, 부산" />
     </div>
+    <div class="km-panel">
+      <h3>연도별 기록</h3>
+      <div class="km-stat-bars" id="km-stat-bars"></div>
+    </div>
     <div class="km-panel" style="flex:1;">
       <h3>다녀온 곳</h3>
       <div id="km-visited-groups">
@@ -226,10 +253,13 @@
       </div>
     </div>
     <div class="km-actions">
-      <button class="km-btn" id="km-export">내보내기</button>
-      <button class="km-btn danger" id="km-reset">전체 초기화</button>
+      <button class="km-btn" id="km-export" style="flex:1;">내보내기</button>
     </div>
   </div>
+</div>
+
+<div class="km-modal-overlay" id="km-roulette-overlay">
+  <div class="km-modal" id="km-roulette-modal"></div>
 </div>
 
 <div class="km-modal-overlay" id="km-modal-overlay">
@@ -394,6 +424,61 @@
   const total = REGIONS.length;
   const nameOf = {};
   REGIONS.forEach(r => nameOf[r.id] = r.name);
+  const ddayEl = root.querySelector('#km-dday');
+  const sidoProgressEl = root.querySelector('#km-sido-progress');
+  const statBarsEl = root.querySelector('#km-stat-bars');
+  const rouletteBtn = root.querySelector('#km-roulette-btn');
+  const rouletteOverlay = root.querySelector('#km-roulette-overlay');
+  const rouletteModal = root.querySelector('#km-roulette-modal');
+  const START_DATE = new Date(2025, 5, 10);
+  const allSidoCodes = new Set(REGIONS.map(r => r.id.slice(0, 2)));
+
+  function sidoOf(id) { return id.slice(0, 2); }
+
+  function updateDday() {
+    const now = new Date();
+    const diffDays = Math.floor((now - START_DATE) / 86400000) + 1;
+    ddayEl.textContent = '함께한 지 D+' + diffDays + '일';
+  }
+
+  function updateStats() {
+    const visitedIds = Object.keys(visited);
+    const visitedSido = new Set(visitedIds.map(id => sidoOf(id)));
+    sidoProgressEl.textContent = visitedSido.size + ' / ' + allSidoCodes.size + '개 시·도';
+
+    const yearCounts = {};
+    visitedIds.forEach(id => {
+      (visited[id] || []).forEach(y => { yearCounts[y] = (yearCounts[y] || 0) + 1; });
+    });
+    const years = Object.keys(yearCounts).sort((a, b) => b - a);
+    if (years.length === 0) {
+      statBarsEl.innerHTML = '<div class="km-empty">아직 기록이 없어요.</div>';
+      return;
+    }
+    const max = Math.max(...years.map(y => yearCounts[y]));
+    statBarsEl.innerHTML = '';
+    years.forEach(y => {
+      const row = document.createElement('div');
+      row.className = 'km-stat-row';
+      const label = document.createElement('span');
+      label.className = 'km-stat-label';
+      label.textContent = y + '년';
+      const track = document.createElement('div');
+      track.className = 'km-stat-track';
+      const fill = document.createElement('div');
+      fill.className = 'km-stat-fill';
+      fill.style.width = Math.max(6, (yearCounts[y] / max * 100)) + '%';
+      fill.style.background = colorForYear(y);
+      track.appendChild(fill);
+      const count = document.createElement('span');
+      count.className = 'km-stat-count';
+      count.textContent = yearCounts[y];
+      row.appendChild(label);
+      row.appendChild(track);
+      row.appendChild(count);
+      statBarsEl.appendChild(row);
+    });
+  }
 
   const thisYear = new Date().getFullYear();
   const maxYear = Math.max(thisYear + 1, START_YEAR + 3);
@@ -549,6 +634,7 @@
     const count = Object.keys(visited).length;
     countEl.innerHTML = count + '<small> / ' + total + '</small>';
     pctEl.textContent = Math.round((count / total) * 100) + '% 방문';
+    updateStats();
     renderGroups();
   }
 
@@ -661,16 +747,6 @@
   });
 
   // ---------- Actions ----------
-  root.querySelector('#km-reset').addEventListener('click', () => {
-    const cloudNote = AppStorage.isFirestore()
-      ? '\n\n⚠️ 실시간 공유가 켜져 있어서, 초기화하면 상대방 화면의 기록도 함께 지워져요.'
-      : '';
-    if (!confirm('색칠한 모든 지역을 초기화할까요? (사진은 유지됩니다)' + cloudNote)) return;
-    if (AppStorage.isFirestore() && !confirm('정말로 진행할까요? 되돌릴 수 없어요.')) return;
-    visited = {};
-    render();
-    save();
-  });
 
   root.querySelector('#km-export').addEventListener('click', () => {
     const byYear = {};
@@ -855,6 +931,33 @@
     }
     modal.appendChild(row3);
 
+    const row4 = document.createElement('div');
+    row4.className = 'km-settings-row';
+    row4.style.marginBottom = '0';
+    row4.innerHTML = '<label style="color:var(--heart);">위험 구역</label>';
+    const resetBtn = document.createElement('button');
+    resetBtn.className = 'km-btn danger';
+    resetBtn.style.width = 'auto';
+    resetBtn.style.display = 'inline-block';
+    resetBtn.textContent = '전체 초기화';
+    resetBtn.addEventListener('click', () => {
+      const cloudNote = AppStorage.isFirestore()
+        ? '\n\n⚠️ 실시간 공유가 켜져 있어서, 초기화하면 상대방 화면의 기록도 함께 지워져요.'
+        : '';
+      if (!confirm('정말로 색칠한 모든 지역을 초기화할까요? (사진은 유지됩니다)' + cloudNote)) return;
+      if (!confirm('한 번 더 확인할게요. 이 작업은 되돌릴 수 없어요. 정말 진행할까요?')) return;
+      visited = {};
+      render();
+      save();
+      closeModal();
+    });
+    row4.appendChild(resetBtn);
+    const resetHint = document.createElement('div');
+    resetHint.className = 'km-photo-hint';
+    resetHint.textContent = '색칠한 지역만 지워져요. 사진과 배경 설정은 남아있어요.';
+    row4.appendChild(resetHint);
+    modal.appendChild(row4);
+
     modalOverlay.classList.add('open');
   }
 
@@ -972,7 +1075,94 @@
     }
   }
 
-  // ---------- Zoom & Pan ----------
+  // ---------- Roulette (random unvisited pick) ----------
+  function closeRoulette() { rouletteOverlay.classList.remove('open'); rouletteModal.innerHTML = ''; }
+  rouletteOverlay.addEventListener('click', (e) => { if (e.target === rouletteOverlay) closeRoulette(); });
+
+  function getUnvisited() {
+    return REGIONS.filter(r => !(visited[r.id] && visited[r.id].length));
+  }
+
+  function renderRouletteContent() {
+    rouletteModal.innerHTML = '';
+    const head = document.createElement('div');
+    head.className = 'km-modal-head';
+    head.innerHTML = '<p class="km-modal-title">🎲 다음 여행지 뽑기</p>';
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'km-modal-close';
+    closeBtn.textContent = '✕';
+    closeBtn.addEventListener('click', closeRoulette);
+    head.appendChild(closeBtn);
+    rouletteModal.appendChild(head);
+
+    const pool = getUnvisited();
+    const display = document.createElement('div');
+    display.className = 'km-roulette-display';
+    rouletteModal.appendChild(display);
+
+    if (pool.length === 0) {
+      display.textContent = '이미 다 다녀오셨어요! 🎉';
+      const hint = document.createElement('div');
+      hint.className = 'km-photo-hint';
+      hint.style.textAlign = 'center';
+      hint.textContent = '229곳을 전부 색칠하셨네요.';
+      rouletteModal.appendChild(hint);
+      return;
+    }
+
+    const actions = document.createElement('div');
+    actions.className = 'km-roulette-actions';
+    const spinBtn = document.createElement('button');
+    spinBtn.className = 'km-btn';
+    spinBtn.textContent = '뽑기 시작';
+    const closeBtn2 = document.createElement('button');
+    closeBtn2.className = 'km-btn danger';
+    closeBtn2.textContent = '닫기';
+    closeBtn2.addEventListener('click', closeRoulette);
+    actions.appendChild(spinBtn);
+    actions.appendChild(closeBtn2);
+    rouletteModal.appendChild(actions);
+
+    const hint = document.createElement('div');
+    hint.className = 'km-photo-hint';
+    hint.style.textAlign = 'center';
+    hint.style.marginTop = '8px';
+    hint.textContent = '아직 안 가본 ' + pool.length + '곳 중에서 뽑아요.';
+    rouletteModal.appendChild(hint);
+
+    spinBtn.addEventListener('click', () => {
+      spinBtn.disabled = true;
+      display.classList.add('spinning');
+      const finalPick = pool[Math.floor(Math.random() * pool.length)];
+      let step = 0;
+      const totalSteps = 18;
+      function tick() {
+        const r = pool[Math.floor(Math.random() * pool.length)];
+        display.textContent = r.name;
+        step++;
+        if (step < totalSteps) {
+          const delay = 45 + step * step * 1.6;
+          setTimeout(tick, delay);
+        } else {
+          display.textContent = finalPick.name;
+          display.classList.remove('spinning');
+          spinBtn.disabled = false;
+          spinBtn.textContent = '다시 뽑기';
+          hint.textContent = '여기 어때요? 다음 데이트 후보!';
+        }
+      }
+      tick();
+    });
+  }
+
+  function openRouletteModal() {
+    renderRouletteContent();
+    rouletteOverlay.classList.add('open');
+  }
+
+  rouletteBtn.addEventListener('click', openRouletteModal);
+
+
   let scale = 1, tx = 0, ty = 0;
   const MIN_SCALE = 1, MAX_SCALE = 6;
 
@@ -1085,6 +1275,7 @@
 
   buildYearPills();
   buildSvg();
+  updateDday();
   AppStorage.tryAutoConnect();
   loadSettings();
   load();
