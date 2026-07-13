@@ -68,6 +68,14 @@
   .km-rank-name { flex:1; color: var(--ink); cursor:pointer; }
   .km-rank-name:hover { text-decoration: underline; }
   .km-rank-count { color: var(--muted); font-size: 11px; flex-shrink:0; }
+  .km-timeline-row {
+    display:flex; align-items:center; gap:12px; padding: 8px 4px;
+    border-bottom: 1px solid #EDE6D4; cursor: pointer; font-size: 12.5px;
+  }
+  .km-timeline-row:hover { background: #F5EFE0; }
+  .km-timeline-row:last-child { border-bottom: none; }
+  .km-timeline-date { width: 92px; flex-shrink:0; color: var(--muted); font-family: 'Noto Serif KR', serif; }
+  .km-timeline-name { color: var(--ink); font-weight: 500; }
   .km-stat-row { display:flex; align-items:center; gap:8px; font-size: 11.5px; }
   .km-stat-label { width: 42px; color: var(--muted); flex-shrink:0; }
   .km-stat-track { flex:1; background:#EDE6D4; border-radius: 5px; height: 10px; overflow:hidden; }
@@ -220,6 +228,7 @@
   <div class="km-header-right">
     <button class="km-roulette-btn" id="km-roulette-btn">🎲 다음 여행지 뽑기</button>
     <button class="km-roulette-btn" id="km-ranking-btn">🏆 방문 랭킹</button>
+    <button class="km-roulette-btn" id="km-timeline-btn">📅 타임라인</button>
     <div class="km-stats">
       <div class="km-count" id="km-count">0<small> / 229</small></div>
       <div style="font-size:11px; color:var(--muted);" id="km-pct">0% 방문</div>
@@ -437,6 +446,7 @@
   const statBarsEl = root.querySelector('#km-stat-bars');
   const rouletteBtn = root.querySelector('#km-roulette-btn');
   const rankingBtn = root.querySelector('#km-ranking-btn');
+  const timelineBtn = root.querySelector('#km-timeline-btn');
   const rouletteOverlay = root.querySelector('#km-roulette-overlay');
   const rouletteModal = root.querySelector('#km-roulette-modal');
   const START_DATE = new Date(2025, 5, 10);
@@ -537,6 +547,181 @@
   }
 
   rankingBtn.addEventListener('click', openRankingModal);
+
+  // ---------- Timeline ----------
+  let timelineYear = null;
+  let timelineMode = 'year'; // 'year' | 'region'
+  let expandedTimelineRegions = new Set();
+
+  function buildTimelineEntries() {
+    const entries = [];
+    Object.keys(visitDates).forEach(id => {
+      (visitDates[id] || []).forEach(dateStr => {
+        entries.push({ id: id, date: dateStr, year: dateStr.slice(0, 4) });
+      });
+    });
+    return entries;
+  }
+
+  function formatDateKrLong(dateStr) {
+    const d = new Date(dateStr + 'T00:00:00');
+    if (isNaN(d)) return dateStr;
+    const days = ['일', '월', '화', '수', '목', '금', '토'];
+    return (d.getMonth() + 1) + '월 ' + d.getDate() + '일 (' + days[d.getDay()] + ')';
+  }
+
+  function formatDateKrFull(dateStr) {
+    const d = new Date(dateStr + 'T00:00:00');
+    if (isNaN(d)) return dateStr;
+    const days = ['일', '월', '화', '수', '목', '금', '토'];
+    return d.getFullYear() + '.' + String(d.getMonth() + 1).padStart(2, '0') + '.' + String(d.getDate()).padStart(2, '0') + ' (' + days[d.getDay()] + ')';
+  }
+
+  function renderTimelineTabs() {
+    const tabRow = document.createElement('div');
+    tabRow.style.cssText = 'display:flex; gap:6px; margin-bottom:14px;';
+    [['year', '연도별'], ['region', '지역별']].forEach(([mode, label]) => {
+      const tab = document.createElement('button');
+      tab.textContent = label;
+      const active = timelineMode === mode;
+      tab.style.cssText = 'flex:1; padding:8px; border-radius:7px; font-size:12.5px; cursor:pointer; border:1px solid ' +
+        (active ? 'var(--ink)' : 'var(--line)') + '; background:' + (active ? 'var(--ink)' : '#fff') +
+        '; color:' + (active ? '#fff' : 'var(--ink)') + '; font-weight:' + (active ? '700' : '400') + ';';
+      tab.addEventListener('click', () => { timelineMode = mode; renderTimelineModal(); });
+      tabRow.appendChild(tab);
+    });
+    modal.appendChild(tabRow);
+  }
+
+  function renderTimelineByYear(entries) {
+    const years = [...new Set(entries.map(e => e.year))].sort((a, b) => b - a);
+    if (!timelineYear || !years.includes(timelineYear)) timelineYear = years[0];
+
+    const pillRow = document.createElement('div');
+    pillRow.className = 'km-years';
+    pillRow.style.margin = '0 0 14px';
+    years.forEach(y => {
+      const pill = document.createElement('div');
+      pill.className = 'km-year-pill' + (y === timelineYear ? ' active' : '');
+      const dot = document.createElement('span');
+      dot.className = 'dot';
+      dot.style.background = colorForYear(Number(y));
+      pill.appendChild(dot);
+      const count = entries.filter(e => e.year === y).length;
+      pill.appendChild(document.createTextNode(y + '년 (' + count + ')'));
+      pill.addEventListener('click', () => { timelineYear = y; renderTimelineModal(); });
+      pillRow.appendChild(pill);
+    });
+    modal.appendChild(pillRow);
+
+    const yearEntries = entries.filter(e => e.year === timelineYear).sort((a, b) => a.date.localeCompare(b.date));
+    const list = document.createElement('div');
+    list.style.cssText = 'display:flex; flex-direction:column; gap:2px; max-height:320px; overflow-y:auto;';
+    yearEntries.forEach(e => {
+      const row = document.createElement('div');
+      row.className = 'km-timeline-row';
+      const dateEl = document.createElement('span');
+      dateEl.className = 'km-timeline-date';
+      dateEl.textContent = formatDateKrLong(e.date);
+      const nameEl = document.createElement('span');
+      nameEl.className = 'km-timeline-name';
+      nameEl.textContent = nameOf[e.id];
+      if (photoIds.has(e.id)) nameEl.textContent += ' 📷';
+      row.appendChild(dateEl);
+      row.appendChild(nameEl);
+      row.addEventListener('click', () => openPhotoModal(e.id));
+      list.appendChild(row);
+    });
+    modal.appendChild(list);
+  }
+
+  function renderTimelineByRegion() {
+    const ids = Object.keys(visitDates)
+      .filter(id => (visitDates[id] || []).length > 0)
+      .sort((a, b) => (visitDates[b].length - visitDates[a].length) || nameOf[a].localeCompare(nameOf[b], 'ko'));
+
+    const list = document.createElement('div');
+    list.style.cssText = 'display:flex; flex-direction:column; gap:2px; max-height:380px; overflow-y:auto;';
+    ids.forEach(id => {
+      const dates = visitDates[id].slice().sort();
+      const isOpen = expandedTimelineRegions.has(id);
+
+      const header = document.createElement('div');
+      header.className = 'km-timeline-row';
+      const nameEl = document.createElement('span');
+      nameEl.className = 'km-timeline-name';
+      nameEl.textContent = nameOf[id] + (photoIds.has(id) ? ' 📷' : '');
+      const countEl = document.createElement('span');
+      countEl.className = 'km-timeline-date';
+      countEl.style.width = 'auto';
+      countEl.style.marginLeft = 'auto';
+      countEl.textContent = dates.length + '회 ' + (isOpen ? '▾' : '▸');
+      header.appendChild(nameEl);
+      header.appendChild(countEl);
+      header.addEventListener('click', () => {
+        if (expandedTimelineRegions.has(id)) expandedTimelineRegions.delete(id);
+        else expandedTimelineRegions.add(id);
+        renderTimelineModal();
+      });
+      list.appendChild(header);
+
+      if (isOpen) {
+        dates.forEach(d => {
+          const sub = document.createElement('div');
+          sub.className = 'km-timeline-row';
+          sub.style.paddingLeft = '18px';
+          sub.style.borderBottom = 'none';
+          const dot = document.createElement('span');
+          dot.style.cssText = 'width:7px;height:7px;border-radius:50%;flex-shrink:0;background:' + colorForYear(new Date(d).getFullYear());
+          const dEl = document.createElement('span');
+          dEl.className = 'km-timeline-date';
+          dEl.style.width = 'auto';
+          dEl.textContent = formatDateKrFull(d);
+          sub.appendChild(dot);
+          sub.appendChild(dEl);
+          sub.addEventListener('click', () => openPhotoModal(id));
+          list.appendChild(sub);
+        });
+      }
+    });
+    modal.appendChild(list);
+  }
+
+  function renderTimelineModal() {
+    modal.innerHTML = '';
+    const head = document.createElement('div');
+    head.className = 'km-modal-head';
+    head.innerHTML = '<p class="km-modal-title">📅 타임라인</p>';
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'km-modal-close';
+    closeBtn.textContent = '✕';
+    closeBtn.addEventListener('click', closeModal);
+    head.appendChild(closeBtn);
+    modal.appendChild(head);
+
+    const entries = buildTimelineEntries();
+    if (entries.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'km-empty';
+      empty.textContent = '아직 방문 날짜 기록이 없어요.\n지도를 클릭해서 날짜를 추가해보세요.';
+      modal.appendChild(empty);
+      modalOverlay.classList.add('open');
+      return;
+    }
+
+    renderTimelineTabs();
+    if (timelineMode === 'year') renderTimelineByYear(entries);
+    else renderTimelineByRegion();
+
+    modalOverlay.classList.add('open');
+  }
+
+  function openTimelineModal() {
+    timelineYear = null;
+    renderTimelineModal();
+  }
+
+  timelineBtn.addEventListener('click', openTimelineModal);
 
   const thisYear = new Date().getFullYear();
   const maxYear = Math.max(thisYear + 1, START_YEAR + 3);
