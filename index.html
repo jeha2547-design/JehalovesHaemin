@@ -178,12 +178,24 @@
   .km-modal-overlay.open { display: flex; }
   .km-modal {
     background: var(--paper); border-radius: 14px; padding: 20px 22px 22px;
-    max-width: 460px; width: 100%; max-height: 84vh; overflow-y: auto;
+    max-width: 600px; width: 100%; max-height: 84vh; overflow-y: auto;
     box-shadow: 0 20px 50px rgba(0,0,0,0.3);
   }
   .km-modal-head { display:flex; align-items:center; justify-content:space-between; margin-bottom: 14px; }
   .km-modal-title { font-family: 'Noto Serif KR', serif; font-size: 18px; font-weight: 700; margin:0; }
   .km-modal-close { cursor:pointer; font-size: 20px; color: var(--muted); border:none; background:none; line-height:1; }
+  .km-cal-grid { display:grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .km-cal-month { border:1px solid var(--line); border-radius:8px; padding:6px; background:#fff; }
+  .km-cal-month-title { font-size: 11px; font-weight:700; text-align:center; margin-bottom:4px; color: var(--ink); }
+  .km-cal-weekdays { display:grid; grid-template-columns: repeat(7,1fr); font-size: 8px; color: var(--muted); text-align:center; margin-bottom:2px; }
+  .km-cal-days { display:grid; grid-template-columns: repeat(7,1fr); gap:1px; }
+  .km-cal-day { aspect-ratio:1; display:flex; align-items:center; justify-content:center; font-size: 9px; border-radius:3px; color: var(--ink); }
+  .km-cal-day.empty { visibility:hidden; }
+  .km-cal-day.visited { cursor:pointer; color:#fff; font-weight:700; }
+  .km-cal-day.visited:hover { outline: 1.5px solid var(--ink); }
+  @media (max-width: 640px) {
+    .km-cal-grid { grid-template-columns: repeat(2, 1fr); }
+  }
   .km-modal-close:hover { color: var(--ink); }
   .km-swatches { display:flex; gap:8px; flex-wrap:wrap; margin-bottom: 10px; }
   .km-swatch {
@@ -499,7 +511,14 @@
     });
   }
 
+  let rankingYear = 'all';
+
   function openRankingModal() {
+    rankingYear = 'all';
+    renderRankingModal();
+  }
+
+  function renderRankingModal() {
     modal.innerHTML = '';
     const head = document.createElement('div');
     head.className = 'km-modal-head';
@@ -511,19 +530,57 @@
     head.appendChild(closeBtn);
     modal.appendChild(head);
 
-    const counts = Object.keys(visitDates)
-      .map(id => ({ id, count: (visitDates[id] || []).length }))
-      .filter(r => r.count > 0)
+    const allEntries = [];
+    Object.keys(visitDates).forEach(id => {
+      (visitDates[id] || []).forEach(d => allEntries.push({ id: id, year: d.slice(0, 4) }));
+    });
+
+    if (allEntries.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'km-empty';
+      empty.textContent = '아직 방문 날짜 기록이 없어요.\n지도를 클릭해서 날짜를 추가해보세요.';
+      modal.appendChild(empty);
+      modalOverlay.classList.add('open');
+      return;
+    }
+
+    const years = [...new Set(allEntries.map(e => e.year))].sort((a, b) => b - a);
+    const pillRow = document.createElement('div');
+    pillRow.className = 'km-years';
+    pillRow.style.margin = '0 0 14px';
+    const allPill = document.createElement('div');
+    allPill.className = 'km-year-pill' + (rankingYear === 'all' ? ' active' : '');
+    allPill.textContent = '전체';
+    allPill.addEventListener('click', () => { rankingYear = 'all'; renderRankingModal(); });
+    pillRow.appendChild(allPill);
+    years.forEach(y => {
+      const pill = document.createElement('div');
+      pill.className = 'km-year-pill' + (rankingYear === y ? ' active' : '');
+      const dot = document.createElement('span');
+      dot.className = 'dot';
+      dot.style.background = colorForYear(Number(y));
+      pill.appendChild(dot);
+      pill.appendChild(document.createTextNode(y + '년'));
+      pill.addEventListener('click', () => { rankingYear = y; renderRankingModal(); });
+      pillRow.appendChild(pill);
+    });
+    modal.appendChild(pillRow);
+
+    const filtered = rankingYear === 'all' ? allEntries : allEntries.filter(e => e.year === rankingYear);
+    const countMap = {};
+    filtered.forEach(e => { countMap[e.id] = (countMap[e.id] || 0) + 1; });
+    const ranked = Object.keys(countMap)
+      .map(id => ({ id: id, count: countMap[id] }))
       .sort((a, b) => b.count - a.count || nameOf[a.id].localeCompare(nameOf[b.id], 'ko'))
       .slice(0, 15);
 
     const list = document.createElement('div');
     list.className = 'km-rank-list';
-    if (counts.length === 0) {
-      list.innerHTML = '<div class="km-empty">아직 방문 날짜 기록이 없어요.<br/>지도를 클릭해서 날짜를 추가해보세요.</div>';
+    if (ranked.length === 0) {
+      list.innerHTML = '<div class="km-empty">이 연도엔 기록이 없어요.</div>';
     } else {
       const medals = ['🥇', '🥈', '🥉'];
-      counts.forEach((r, i) => {
+      ranked.forEach((r, i) => {
         const row = document.createElement('div');
         row.className = 'km-rank-row';
         const medal = document.createElement('span');
@@ -614,25 +671,84 @@
     });
     modal.appendChild(pillRow);
 
-    const yearEntries = entries.filter(e => e.year === timelineYear).sort((a, b) => a.date.localeCompare(b.date));
-    const list = document.createElement('div');
-    list.style.cssText = 'display:flex; flex-direction:column; gap:2px; max-height:320px; overflow-y:auto;';
-    yearEntries.forEach(e => {
-      const row = document.createElement('div');
-      row.className = 'km-timeline-row';
-      const dateEl = document.createElement('span');
-      dateEl.className = 'km-timeline-date';
-      dateEl.textContent = formatDateKrLong(e.date);
-      const nameEl = document.createElement('span');
-      nameEl.className = 'km-timeline-name';
-      nameEl.textContent = nameOf[e.id];
-      if (photoIds.has(e.id)) nameEl.textContent += ' 📷';
-      row.appendChild(dateEl);
-      row.appendChild(nameEl);
-      row.addEventListener('click', () => openPhotoModal(e.id));
-      list.appendChild(row);
+    const yearNum = Number(timelineYear);
+    const dateMap = {};
+    entries.filter(e => e.year === timelineYear).forEach(e => {
+      (dateMap[e.date] = dateMap[e.date] || []).push(e.id);
     });
-    modal.appendChild(list);
+
+    const grid = document.createElement('div');
+    grid.className = 'km-cal-grid';
+    const weekdayLabels = ['일', '월', '화', '수', '목', '금', '토'];
+
+    for (let m = 0; m < 12; m++) {
+      const monthBlock = document.createElement('div');
+      monthBlock.className = 'km-cal-month';
+      const title = document.createElement('div');
+      title.className = 'km-cal-month-title';
+      title.textContent = (m + 1) + '월';
+      monthBlock.appendChild(title);
+
+      const wd = document.createElement('div');
+      wd.className = 'km-cal-weekdays';
+      weekdayLabels.forEach(w => {
+        const s = document.createElement('span');
+        s.textContent = w;
+        wd.appendChild(s);
+      });
+      monthBlock.appendChild(wd);
+
+      const daysWrap = document.createElement('div');
+      daysWrap.className = 'km-cal-days';
+      const firstDay = new Date(yearNum, m, 1).getDay();
+      const daysInMonth = new Date(yearNum, m + 1, 0).getDate();
+      for (let i = 0; i < firstDay; i++) {
+        const empty = document.createElement('div');
+        empty.className = 'km-cal-day empty';
+        daysWrap.appendChild(empty);
+      }
+      for (let day = 1; day <= daysInMonth; day++) {
+        const dateStr = yearNum + '-' + String(m + 1).padStart(2, '0') + '-' + String(day).padStart(2, '0');
+        const cell = document.createElement('div');
+        cell.className = 'km-cal-day';
+        cell.textContent = day;
+        if (dateMap[dateStr]) {
+          cell.classList.add('visited');
+          cell.style.background = colorForYear(yearNum);
+          cell.title = dateMap[dateStr].map(id => nameOf[id]).join(', ');
+          cell.addEventListener('click', () => showCalDayInfo(dateStr, dateMap[dateStr]));
+        }
+        daysWrap.appendChild(cell);
+      }
+      monthBlock.appendChild(daysWrap);
+      grid.appendChild(monthBlock);
+    }
+    modal.appendChild(grid);
+
+    const infoBox = document.createElement('div');
+    infoBox.className = 'km-photo-hint';
+    infoBox.style.cssText = 'margin-top:10px; min-height:16px; font-size:12px;';
+    modal.appendChild(infoBox);
+
+    function showCalDayInfo(dateStr, ids) {
+      infoBox.innerHTML = '';
+      const label = document.createElement('div');
+      label.style.cssText = 'font-weight:700; color:var(--ink); margin-bottom:6px; font-size:13px;';
+      label.textContent = formatDateKrFull(dateStr);
+      infoBox.appendChild(label);
+      const chipsWrap = document.createElement('div');
+      chipsWrap.style.cssText = 'display:flex; flex-wrap:wrap; gap:6px;';
+      ids.forEach(id => {
+        const chip = document.createElement('span');
+        chip.className = 'km-chip';
+        chip.style.background = colorForYear(yearNum);
+        chip.style.cursor = 'pointer';
+        chip.textContent = nameOf[id];
+        chip.addEventListener('click', () => openPhotoModal(id));
+        chipsWrap.appendChild(chip);
+      });
+      infoBox.appendChild(chipsWrap);
+    }
   }
 
   function renderTimelineByRegion() {
@@ -735,7 +851,7 @@
 
   let visited = {};
   let visitDates = {};
-  let collapsedYears = new Set();
+  let expandedYears = new Set();
 
   function deriveVisited() {
     visited = {};
@@ -912,7 +1028,7 @@
 
     groupsEl.innerHTML = '';
     Object.keys(byYear).sort((a, b) => b - a).forEach(y => {
-      const isCollapsed = collapsedYears.has(y);
+      const isCollapsed = !expandedYears.has(y);
       const group = document.createElement('div');
       group.className = 'km-year-group';
 
@@ -929,8 +1045,8 @@
       chevron.textContent = isCollapsed ? '▸' : '▾';
       label.appendChild(chevron);
       label.addEventListener('click', () => {
-        if (collapsedYears.has(y)) collapsedYears.delete(y);
-        else collapsedYears.add(y);
+        if (expandedYears.has(y)) expandedYears.delete(y);
+        else expandedYears.add(y);
         renderGroups();
       });
       group.appendChild(label);
@@ -938,13 +1054,17 @@
       if (!isCollapsed) {
         const list = document.createElement('div');
         list.className = 'km-visited-list';
-        byYear[y].sort((a, b) => nameOf[a].localeCompare(nameOf[b], 'ko')).forEach(id => {
+        const countInYear = (id) => (visitDates[id] || []).filter(d => d.slice(0, 4) === String(y)).length;
+        byYear[y]
+          .sort((a, b) => countInYear(b) - countInYear(a) || nameOf[a].localeCompare(nameOf[b], 'ko'))
+          .forEach(id => {
           const chip = document.createElement('span');
           chip.className = 'km-chip';
           chip.style.background = colorForYear(y);
           chip.title = '눌러서 사진 추가/보기';
           const label2 = document.createElement('span');
-          label2.textContent = nameOf[id];
+          const cnt = countInYear(id);
+          label2.textContent = nameOf[id] + (cnt > 1 ? ' (' + cnt + '회)' : '');
           chip.appendChild(label2);
           if (photoIds.has(id)) {
             const cam = document.createElement('span');
